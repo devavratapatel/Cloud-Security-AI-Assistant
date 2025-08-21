@@ -385,6 +385,163 @@
         chatDiv.scrollTop = chatDiv.scrollHeight;
     }
     
+    function showVoiceFallback() {
+    const fallbackHtml = `
+        <div id="voice-fallback" style="margin-top: 15px; padding: 15px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e9ecef;">
+            <p style="margin: 0 0 10px 0; color: #6c757d;">Voice input not available on server. Type what you would say:</p>
+            <div style="display: flex; gap: 10px;">
+                <input type="text" id="voice-fallback-input" placeholder="Type your message here..." 
+                       style="flex: 1; padding: 10px; border: 1px solid #ced4da; border-radius: 4px;">
+                <button onclick="submitVoiceFallback()" 
+                        style="padding: 10px 15px; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                    Send
+                </button>
+            </div>
+        </div>
+    `;
+    
+    // Insert after the input container
+    const inputContainer = document.querySelector('.input-container');
+    inputContainer.insertAdjacentHTML('afterend', fallbackHtml);
+}
+
+// Add this function to handle the fallback submission
+async function submitVoiceFallback() {
+    const fallbackInput = document.getElementById('voice-fallback-input');
+    const text = fallbackInput.value.trim();
+    
+    if (!text) return;
+    
+    // Remove the fallback UI
+    const fallback = document.getElementById('voice-fallback');
+    if (fallback) fallback.remove();
+    
+    isProcessing = true;
+    showTypingIndicator();
+    
+    try {
+        const response = await fetch('/voice-chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                text: text,
+                chat_history: getChatHistory() 
+            })
+        });
+        
+        const data = await response.json();
+        hideTypingIndicator();
+        
+        if (data.response) {
+            addMessage('user', text, true);
+            
+            // Format the agent response before displaying
+            const formattedResponse = formatAgentResponse(data.response);
+            addMessage('agent', formattedResponse);
+            
+            // Play audio if available
+            if (data.audio_url) {
+                const audio = new Audio(data.audio_url);
+                audio.play();
+            }
+        } else if (data.error) {
+            addMessage('agent', 'Error: ' + data.error);
+        }
+    } catch (error) {
+        hideTypingIndicator();
+        addMessage('agent', 'Sorry, I encountered an error. Please try again.');
+        console.error('Error:', error);
+    } finally {
+        isProcessing = false;
+        fallbackInput.value = '';
+    }
+}
+
+// Update the startVoiceChat function to handle server environments
+async function startVoiceChat() {
+    if (isProcessing) return;
+    isProcessing = true;
+    
+    showTypingIndicator();
+    
+    try {
+        const response = await fetch('/voice-chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_history: getChatHistory() })
+        });
+        
+        const data = await response.json();
+        hideTypingIndicator();
+        
+        if (data.response) {
+            // Format the response for display
+            const formattedResponse = formatAgentResponse(data.response);
+            addMessage('user', data.response, true);
+            addMessage('agent', formattedResponse);
+            
+            // Play audio if available
+            if (data.audio_url) {
+                const audio = new Audio(data.audio_url);
+                audio.play();
+            }
+        } else if (data.error) {
+            if (data.error === "Voice input not available on server") {
+                if (data.fallback_available !== false) {
+                    // Show the text fallback UI
+                    showVoiceFallback();
+                } else {
+                    addMessage('agent', 'Voice input is not available on the server. Please use text input instead.');
+                }
+            } else {
+                addMessage('agent', 'Error: ' + data.error);
+            }
+        }
+    } catch (error) {
+        hideTypingIndicator();
+        // Assume it's a server environment if there's an error
+        showVoiceFallback();
+        console.error('Error:', error);
+    } finally {
+        isProcessing = false;
+    }
+}
+
+    // Add this function to detect server environment
+async function checkServerEnvironment() {
+    try {
+        const response = await fetch('/debug/env');
+        const data = await response.json();
+        return data.environment === "Render";
+    } catch (error) {
+        console.log('Could not detect server environment:', error);
+        return false;
+    }
+}
+
+// Optional: Disable voice button on server environments
+async function initApp() {
+    const isServer = await checkServerEnvironment();
+    if (isServer) {
+        const voiceButton = document.querySelector('.voice-btn');
+        if (voiceButton) {
+            voiceButton.title = "Voice input not available on server";
+            voiceButton.style.opacity = "0.6";
+            voiceButton.style.cursor = "not-allowed";
+            voiceButton.onclick = function() {
+                showVoiceFallback();
+                return false;
+            };
+        }
+    }
+    
+    // Focus input on load
+    messageInput.focus();
+}
+
+// Call init on load
+document.addEventListener('DOMContentLoaded', initApp);
+
     function showTypingIndicator() {
         const indicator = document.createElement('div');
         indicator.className = 'typing-indicator';

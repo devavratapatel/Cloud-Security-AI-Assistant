@@ -4,7 +4,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 load_dotenv()
-
+from gtts import gTTS
 from agents.agent_graph import agent_graph
 from langchain_core.messages import HumanMessage, AIMessage
 import json
@@ -328,6 +328,17 @@ def text_to_speech_with_fallback(text):
     # All providers failed or not configured
     if not elevenlabs_configured and not speechify_configured and not resemble_configured:
         error_messages.append("No TTS providers configured. Please set API keys.")
+        try:
+            tts = gTTS(text=text, lang='en',slow=False)
+            audio_buffer = io.BytesIO()
+            tts.writer_to_fpp(audio_buffer)
+            audio_buffer.seek(0)
+            audio_content = audio_buffer.getValue()
+            print("gTTS Success")
+            return audio_content, "gTTS", error_messages
+        except Exception as e:
+            print(f"gTTS fallback failed: {str(e)}")
+            return None
     
     print(f"TTS not available. Errors: {error_messages}")
     return None, "none", error_messages

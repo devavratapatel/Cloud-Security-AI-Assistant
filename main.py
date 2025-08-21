@@ -216,7 +216,23 @@ async def voice_chat_with_agent():
 
 @app.get("/")
 async def serve_frontend():
-    html_content = "securiassist.html"
+    try:
+        with open("securiassist.html", "r", encoding="utf-8") as f:
+            html_content = f.read()
+    except FileNotFoundError:
+        # Fallback: return a simple message or create the HTML on the fly
+        html_content = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>SecurAssist</title>
+        </head>
+        <body>
+            <h1>SecurAssist</h1>
+            <p>HTML file not found. Please check your deployment.</p>
+        </body>
+        </html>
+        """
     
     from fastapi.responses import HTMLResponse
     return HTMLResponse(content=html_content)

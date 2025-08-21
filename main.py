@@ -416,59 +416,80 @@ async def voice_chat_with_agent(request: Request):
             try:
                 request_data = await request.json()
                 text_input = request_data.get("text", "")
+                is_fallback = request_data.get("is_fallback", False)
                 
                 if text_input:
                     # Process as text input instead of voice
                     chat_history = request_data.get("chat_history", [])
                     chat_request = ChatRequest(message=text_input, chat_history=chat_history)
                     response = await chat_with_agent(chat_request)
-                    return response
+                    
+                    # Add flag to indicate this was a fallback response
+                    response_dict = response.dict()
+                    response_dict["is_fallback"] = is_fallback
+                    return JSONResponse(content=response_dict)
                 else:
                     return JSONResponse(content={
                         "error": "Voice input not available on server",
                         "message": "Please use the text input field or provide text in the request body.",
-                        "fallback_available": True
+                        "fallback_available": True,
+                        "is_fallback": False
                     })
                     
             except Exception as json_error:
                 return JSONResponse(content={
                     "error": "Voice input not available on server",
                     "message": "Please use the text input field.",
-                    "fallback_available": False
+                    "fallback_available": False,
+                    "is_fallback": False
                 })
         
-        # Local environment with microphone access
-        user_input = ""
-        with sr.Microphone() as source:
-            print("Listening...")
-            recognizer.adjust_for_ambient_noise(source)
-            audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
-
-            try:
-                user_input = recognizer.recognize_google(audio)
-                print("You said: ", user_input)
-            except sr.WaitTimeoutError:
-                return JSONResponse(content={"error": "No speech detected"})
-            except sr.UnknownValueError:
-                return JSONResponse(content={"error": "Couldn't understand audio"})
-            except sr.RequestError:
-                return JSONResponse(content={"error": "Could not request results from Google Speech Recognition service"})
-        
-        if not user_input:
-            return JSONResponse(content={"error": "No input received"})
-
-        # Get chat history from request if available
+        # Local environment with microphone access - try to use voice
         try:
-            request_data = await request.json()
-            chat_history = request_data.get("chat_history", [])
-        except:
-            chat_history = []
-        
-        # Process the voice input
-        chat_request = ChatRequest(message=user_input, chat_history=chat_history)
-        response = await chat_with_agent(chat_request)
-        
-        return response
+            user_input = ""
+            with sr.Microphone() as source:
+                print("Listening...")
+                recognizer.adjust_for_ambient_noise(source)
+                audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
+
+                try:
+                    user_input = recognizer.recognize_google(audio)
+                    print("You said: ", user_input)
+                except sr.WaitTimeoutError:
+                    return JSONResponse(content={"error": "No speech detected", "is_fallback": False})
+                except sr.UnknownValueError:
+                    return JSONResponse(content={"error": "Couldn't understand audio", "is_fallback": False})
+                except sr.RequestError:
+                    return JSONResponse(content={"error": "Could not request results from Google Speech Recognition service", "is_fallback": False})
+            
+            if not user_input:
+                return JSONResponse(content={"error": "No input received", "is_fallback": False})
+
+            # Get chat history from request if available
+            try:
+                request_data = await request.json()
+                chat_history = request_data.get("chat_history", [])
+            except:
+                chat_history = []
+            
+            # Process the voice input
+            chat_request = ChatRequest(message=user_input, chat_history=chat_history)
+            response = await chat_with_agent(chat_request)
+            
+            # Add flag to indicate this was a real voice response
+            response_dict = response.dict()
+            response_dict["is_fallback"] = False
+            return response_dict
+            
+        except Exception as voice_error:
+            print(f"Voice capture error: {voice_error}")
+            # Fall back to text input if voice fails
+            return JSONResponse(content={
+                "error": "Microphone access failed",
+                "message": "Please use text input instead.",
+                "fallback_available": True,
+                "is_fallback": False
+            })
         
     except Exception as e:
         print(f"Voice chat error: {e}")

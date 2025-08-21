@@ -75,7 +75,7 @@ Even for long contexts, answer as if you are verbally talking to the user, which
 ****SUPER CRITICAL: The output that you give is going to go to a text to speech model so the model can speak it out loud. Follow these TTS optimization rules:
 
 1. AVOID ALL SPECIAL CHARACTERS that might cause issues with TTS:
-   - Never Ever use: *, ~, _, \, /, |, #, @, %, ^, &, +, =, <, >, [, ], {, }
+   - Never Ever use: *, ~, _, \\, /, |, #, @, %, ^, &, +, =, <, >, [, ], {, }
    - Replace bullets with words: Instead of "*" use "bullet point" or "step"
    - Replace symbols with words: Instead of ">" use "then" or "next"
    - Replace slashes with "or" or "and" depending on context
@@ -105,7 +105,7 @@ Even for long contexts, answer as if you are verbally talking to the user, which
    - For complex topics: "There are several aspects to this. Let me start with the most important points..."
    - Offer follow-ups: "I've covered the basics. Would you like me to go into more detail about any specific part?"
    - Gauge user interest: "This is a detailed topic. Should I continue with more information?"
-###Critical: Never Ever use: *, ~, _, \, /, |, #, @, %, ^, &, +, =, <, >, [, ], {, }
+###Critical: Never Ever use: *, ~, _, \\, /, |, #, @, %, ^, &, +, =, <, >, [, ], {, }
 If you don't know based on the context, say so. Ask clarifying questions if needed."""),
         MessagesPlaceholder(variable_name="chat_history"),
         SystemMessage(content=f"Relevant Context:\n{state['context']}"),
@@ -130,8 +130,8 @@ def clarify_question(state: AgentState):
         **CRITICAL: Reply as if you are working with the user. For example: in the case of the user asking for an installation guide output the first step then ask the use to tell you once that is done only then output the second step (also individually). 
         Even for long contexts answer as if you are verbally talking to the user, which means dont output alot of information only output the essentials that are suitable for the user to listen to if they were hearing you.
     
-        ****SUPER CRITICAL: The output that you give is going to go to a text to speech model so the model can speak it out loud. make sure you handle special characters, that can cause the audio to sound rubbish, properly. For example `,~_\/.
-        ###Critical: Never Ever use: *, ~, _, \, /, |, #, @, %, ^, &, +, =, <, >, [, ], {, }"""),
+        ****SUPER CRITICAL: The output that you give is going to go to a text to speech model so the model can speak it out loud. make sure you handle special characters, that can cause the audio to sound rubbish, properly. For example `,~_\\/.
+        ###Critical: Never Ever use: *, ~, _, \\, /, |, #, @, %, ^, &, +, =, <, >, [, ], {, }"""),
         MessagesPlaceholder(variable_name="chat_history"),
         HumanMessage(content=state["input"])
     ])

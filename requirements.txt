@@ -12,3 +12,4 @@ langchain-google-genai
 langgraph
 chromadb
 resemble
+python-multipart

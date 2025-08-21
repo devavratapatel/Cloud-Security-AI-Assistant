@@ -13,3 +13,4 @@ langgraph
 chromadb
 resemble
 python-multipart
+elevenlabs

@@ -26,7 +26,6 @@ retriever = vectorstore.as_retriever(search_kwargs={"k":3})
 
 def retrieve_context(state: AgentState):
     """Retrieve relevant context from the knowledge base."""
-    print("[Node: Retrieving context...]")
     
     docs = retriever.invoke(state["input"])
     context = "\n\n".join([doc.page_content for doc in docs] )

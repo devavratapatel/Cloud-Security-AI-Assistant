@@ -275,7 +275,7 @@ def text_to_speech_resemble(text, voice_uuid=None, output_format="wav", sample_r
 
 def text_to_speech_with_fallback(text):
     """
-    Convert text to speech using ElevenLabs first, then Speechify, then Resemble AI as fallback
+    Convert text to speech with multiple fallbacks - final version with offline pyttsx3
     """
     print(f"TTS Request: {text[:100]}...")
     
@@ -295,7 +295,7 @@ def text_to_speech_with_fallback(text):
             print("Trying ElevenLabs TTS...")
             audio_content = text_to_speech_elevenlabs(text)
             print("ElevenLabs TTS successful")
-            return audio_content, "elevenlabs", None
+            return audio_content, "elevenlabs", error_messages
         except Exception as e:
             error_msg = f"ElevenLabs failed: {str(e)}"
             print(error_msg)
@@ -313,10 +313,10 @@ def text_to_speech_with_fallback(text):
             print(error_msg)
             error_messages.append(error_msg)
     
-    # Try Resemble AI as final fallback
+    # Try Resemble AI as fallback
     if resemble_configured:
         try:
-            print("Trying Resemble AI TTS (fallback)...")
+            print("Trying Resemble AI TTS...")
             audio_content = text_to_speech_resemble(text)
             print("Resemble AI TTS successful")
             return audio_content, "resemble", error_messages
@@ -324,10 +324,8 @@ def text_to_speech_with_fallback(text):
             error_msg = f"Resemble AI failed: {str(e)}"
             print(error_msg)
             error_messages.append(error_msg)
-    
-    # All providers failed or not configured
     if not elevenlabs_configured and not speechify_configured and not resemble_configured:
-        error_messages.append("No TTS providers configured. Please set API keys.")
+        # error_messages.append("No TTS providers configured. Please set API keys.")
         try:
             tts = gTTS(text=text, lang='en',slow=False)
             audio_buffer = io.BytesIO()
@@ -338,10 +336,74 @@ def text_to_speech_with_fallback(text):
             return audio_content, "gTTS", error_messages
         except Exception as e:
             print(f"gTTS fallback failed: {str(e)}")
-            return None
+            # return None
+    # Try pyttsx3 as final offline fallback (works on Render)
+    try:
+        print("Trying pyttsx3 offline TTS...")
+        audio_content = text_to_speech_pyttsx3(text)
+        print("pyttsx3 TTS successful")
+        return audio_content, "pyttsx3", error_messages
+    except Exception as e:
+        error_msg = f"pyttsx3 failed: {str(e)}"
+        print(error_msg)
+        error_messages.append(error_msg)
     
+    # All providers failed
     print(f"TTS not available. Errors: {error_messages}")
     return None, "none", error_messages
+
+
+def text_to_speech_pyttsx3(text):
+    """
+    Offline text-to-speech using pyttsx3 (works on Render)
+    """
+    try:
+        import pyttsx3
+        import tempfile
+        import os
+        
+        # Initialize the engine
+        engine = pyttsx3.init()
+        
+        # Set properties (optional)
+        engine.setProperty('rate', 150)  # Speed percent
+        engine.setProperty('volume', 0.9)  # Volume 0-1
+        
+        # Create temporary file
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+            temp_filename = temp_file.name
+        
+        # Save to file
+        engine.save_to_file(text, temp_filename)
+        engine.runAndWait()
+        
+        # Read the file and return bytes
+        with open(temp_filename, 'rb') as f:
+            audio_content = f.read()
+        
+        # Clean up
+        os.unlink(temp_filename)
+        
+        return audio_content
+        
+    except Exception as e:
+        print(f"pyttsx3 error: {e}")
+        
+        # Fallback: Return empty audio or simple beep
+        try:
+            # Create a simple beep sound as fallback
+            from pydub import AudioSegment
+            from pydub.generators import Sine
+            
+            # Generate a simple beep
+            beep = Sine(440).to_audio_segment(duration=500)  # 440Hz for 500ms
+            audio_buffer = io.BytesIO()
+            beep.export(audio_buffer, format="wav")
+            return audio_buffer.getvalue()
+        except:
+            return None
+
+
 
 class ChatRequest(BaseModel):
     message: str

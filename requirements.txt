@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+python-multipart
+langchain
+langchain-google-genai
+langgraph
+chromadb
+tiktoken
+python-dotenv
+speechrecognition
+pydub
+pydantic

@@ -10,3 +10,5 @@ python-dotenv
 speechrecognition
 pydub
 pydantic
+rquests
+uvicorn

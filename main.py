@@ -31,7 +31,11 @@ app.add_middleware(
 
 recognizer = sr.Recognizer()
 
-# Initialize TTS APIs
+# Initialize TTS APIs in order of preference
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")  # Rachel's voice as default
+ELEVENLABS_BASE_URL = "https://api.elevenlabs.io/v1"
+
 SPEECHIFY_API_KEY = os.getenv("SPEECHIFY_API_KEY")
 SPEECHIFY_VOICE_ID = os.getenv("SPEECHIFY_VOICE_ID", "default")
 SPEECHIFY_BASE_URL = os.getenv("SPEECHIFY_BASE_URL", "https://api.speechify.com")
@@ -79,9 +83,63 @@ def normalize_text_for_tts(text):
     
     return text.strip()
 
+def text_to_speech_elevenlabs(text, voice_id=None, model_id="eleven_monolingual_v1"):
+    """
+    Convert text to speech using ElevenLabs API (primary)
+    """
+    if not ELEVENLABS_API_KEY:
+        raise ValueError("ElevenLabs API key not found in environment variables")
+    
+    # Normalize text for TTS
+    normalized_text = normalize_text_for_tts(text)
+    print(f"ElevenLabs - Normalized text: {normalized_text}")
+    
+    # Use default voice if not specified
+    if not voice_id:
+        voice_id = ELEVENLABS_VOICE_ID
+    
+    # Construct the API endpoint
+    url = f"{ELEVENLABS_BASE_URL}/text-to-speech/{voice_id}"
+    
+    # Set up headers and data
+    headers = {
+        "Accept": "audio/mpeg",
+        "Content-Type": "application/json",
+        "xi-api-key": ELEVENLABS_API_KEY
+    }
+    
+    data = {
+        "text": normalized_text,
+        "model_id": model_id,
+        "voice_settings": {
+            "stability": 0.5,
+            "similarity_boost": 0.5
+        }
+    }
+    
+    try:
+        # Make the API request with timeout
+        response = requests.post(url, json=data, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            # Return the audio content
+            return response.content
+        else:
+            error_msg = f"ElevenLabs API error: {response.status_code}"
+            if response.text:
+                error_msg += f" - {response.text}"
+            raise Exception(error_msg)
+            
+    except requests.exceptions.Timeout:
+        raise Exception("ElevenLabs API request timed out")
+    except requests.exceptions.ConnectionError:
+        raise Exception("Failed to connect to ElevenLabs API")
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"ElevenLabs API request failed: {str(e)}")
+
 def text_to_speech_speechify(text, voice_id=None, output_format="mp3"):
     """
-    Convert text to speech using Speechify API (primary)
+    Convert text to speech using Speechify API (secondary)
     """
     if not SPEECHIFY_API_KEY:
         raise ValueError("Speechify API key not found in environment variables")
@@ -94,10 +152,10 @@ def text_to_speech_speechify(text, voice_id=None, output_format="mp3"):
     if not voice_id:
         voice_id = SPEECHIFY_VOICE_ID
     
-    # Construct the API endpoint (adjust based on Speechify's actual API)
+    # Construct the API endpoint
     url = f"{SPEECHIFY_BASE_URL}/v1/synthesize"
     
-    # Set up headers and data (adjust based on Speechify's actual API requirements)
+    # Set up headers and data
     headers = {
         "Authorization": f"Bearer {SPEECHIFY_API_KEY}",
         "Content-Type": "application/json",
@@ -107,16 +165,14 @@ def text_to_speech_speechify(text, voice_id=None, output_format="mp3"):
         "text": normalized_text,
         "voice": voice_id,
         "format": output_format,
-        "speed": 1.0,  # Adjust as needed
-        "pitch": 0,    # Adjust as needed
+        "speed": 1.0,
+        "pitch": 0,
     }
     
     try:
-        # Make the API request with timeout
         response = requests.post(url, json=data, headers=headers, timeout=30)
         
         if response.status_code == 200:
-            # Return the audio content (adjust based on Speechify's response format)
             return response.content
         else:
             error_msg = f"Speechify API error: {response.status_code}"
@@ -146,10 +202,8 @@ def text_to_speech_resemble(text, voice_uuid=None, output_format="wav", sample_r
     if not voice_uuid:
         voice_uuid = RESEMBLE_AI_VOICE_UUID
     
-    # Construct the API endpoint
     url = f"{RESEMBLE_AI_BASE_URL}/synthesize"
     
-    # Set up headers and data
     headers = {
         "Authorization": f"Bearer {RESEMBLE_AI_API_KEY}",
         "Content-Type": "application/json",
@@ -164,21 +218,17 @@ def text_to_speech_resemble(text, voice_uuid=None, output_format="wav", sample_r
     }
     
     try:
-        # Make the API request with timeout
         response = requests.post(url, json=data, headers=headers, timeout=30)
         
         if response.status_code == 200:
-            # Try to parse as JSON first
             try:
                 response_data = response.json()
                 if "audio_content" in response_data:
-                    # Decode the base64 audio content
                     audio_bytes = base64.b64decode(response_data["audio_content"])
                     return audio_bytes
                 else:
                     raise Exception("No audio_content in Resemble AI response")
             except json.JSONDecodeError:
-                # If response is not JSON, assume it's raw audio
                 return response.content
         else:
             error_msg = f"Resemble AI API error: {response.status_code}"
@@ -193,29 +243,48 @@ def text_to_speech_resemble(text, voice_uuid=None, output_format="wav", sample_r
     except requests.exceptions.RequestException as e:
         raise Exception(f"Resemble AI API request failed: {str(e)}")
 
-def text_to_speech_with_fallback(text, tts_provider="speechify"):
+def text_to_speech_with_fallback(text):
     """
-    Convert text to speech using Speechify first, fallback to Resemble AI if it fails
+    Convert text to speech using ElevenLabs first, then Speechify, then Resemble AI as fallback
     """
+    print(f"TTS Request: {text[:100]}...")
+    
     audio_content = None
-    used_provider = tts_provider
     error_messages = []
     
-    # Try Speechify first
-    if tts_provider == "speechify" and SPEECHIFY_API_KEY:
+    # Check which TTS providers are configured
+    elevenlabs_configured = bool(ELEVENLABS_API_KEY)
+    speechify_configured = bool(SPEECHIFY_API_KEY)
+    resemble_configured = bool(RESEMBLE_AI_API_KEY)
+    
+    print(f"TTS Providers - ElevenLabs: {elevenlabs_configured}, Speechify: {speechify_configured}, Resemble: {resemble_configured}")
+    
+    # Try ElevenLabs first (highest priority)
+    if elevenlabs_configured:
+        try:
+            print("Trying ElevenLabs TTS...")
+            audio_content = text_to_speech_elevenlabs(text)
+            print("ElevenLabs TTS successful")
+            return audio_content, "elevenlabs", None
+        except Exception as e:
+            error_msg = f"ElevenLabs failed: {str(e)}"
+            print(error_msg)
+            error_messages.append(error_msg)
+    
+    # Try Speechify second
+    if speechify_configured:
         try:
             print("Trying Speechify TTS...")
             audio_content = text_to_speech_speechify(text)
             print("Speechify TTS successful")
-            return audio_content, "speechify", None
+            return audio_content, "speechify", error_messages
         except Exception as e:
             error_msg = f"Speechify failed: {str(e)}"
             print(error_msg)
             error_messages.append(error_msg)
-            # Continue to fallback
     
-    # Try Resemble AI as fallback
-    if RESEMBLE_AI_API_KEY:
+    # Try Resemble AI as final fallback
+    if resemble_configured:
         try:
             print("Trying Resemble AI TTS (fallback)...")
             audio_content = text_to_speech_resemble(text)
@@ -226,7 +295,11 @@ def text_to_speech_with_fallback(text, tts_provider="speechify"):
             print(error_msg)
             error_messages.append(error_msg)
     
-    # Both providers failed
+    # All providers failed or not configured
+    if not elevenlabs_configured and not speechify_configured and not resemble_configured:
+        error_messages.append("No TTS providers configured. Please set API keys.")
+    
+    print(f"TTS not available. Errors: {error_messages}")
     return None, "none", error_messages
 
 class ChatRequest(BaseModel):
@@ -237,7 +310,7 @@ class ChatResponse(BaseModel):
     response: str
     chat_history: list = []
     audio_url: str = ""
-    tts_provider: str = "none"  # Add provider info to response
+    tts_provider: str = "none"
 
 user_sessions = {}
 
@@ -268,21 +341,22 @@ async def chat_with_agent(request: ChatRequest):
         
         audio_url = ""
         tts_provider = "none"
+        tts_errors = []
+        
         if result['response']:
             try:
-                # Generate audio using Speechify with Resemble fallback
-                audio_content, tts_provider, errors = text_to_speech_with_fallback(result['response'])
+                audio_content, tts_provider, tts_errors = text_to_speech_with_fallback(result['response'])
                 
                 if audio_content:
-                    # Store audio in session
                     user_sessions["default"]["audio"] = audio_content
                     user_sessions["default"]["tts_provider"] = tts_provider
                     audio_url = f"/audio?t={hash(result['response'])}"
                 else:
-                    print("All TTS providers failed. Errors:", errors)
+                    print("TTS not available, continuing without audio")
                     
             except Exception as e:
                 print(f"TTS error: {e}")
+                tts_errors.append(str(e))
         
         formatted_chat_history = []
         for msg in result['chat_history']:
@@ -310,10 +384,18 @@ async def get_audio():
         
         from fastapi import Response
         
+        tts_provider = user_sessions["default"].get("tts_provider", "elevenlabs")
+        
         # Determine content type based on provider
-        tts_provider = user_sessions["default"].get("tts_provider", "resemble")
-        media_type = "audio/wav" if tts_provider == "resemble" else "audio/mp3"
-        filename = "response.wav" if tts_provider == "resemble" else "response.mp3"
+        if tts_provider == "elevenlabs":
+            media_type = "audio/mpeg"
+            filename = "response.mp3"
+        elif tts_provider == "speechify":
+            media_type = "audio/mpeg" 
+            filename = "response.mp3"
+        else:  # resemble or fallback
+            media_type = "audio/wav"
+            filename = "response.wav"
         
         return Response(
             content=audio_data,
@@ -326,15 +408,34 @@ async def get_audio():
 @app.post("/voice-chat")
 async def voice_chat_with_agent(request: Request):
     try:
-        # Check if we're in a server environment (no microphone access)
-        is_server_environment = os.getenv("RENDER", False) or os.getenv("PYTHONANYWHERE", False) or os.getenv("HEROKU", False)
+        # Check if we're in a server environment
+        is_server_environment = os.getenv("RENDER", False) or os.getenv("SERVER", False)
         
         if is_server_environment:
-            # In server environment, return instructions for voice input
-            return JSONResponse(content={
-                "error": "Voice input not available on server",
-                "message": "Please use text input instead. Voice chat only works in local environments with microphone access."
-            })
+            # For server environments, provide a text input fallback
+            try:
+                request_data = await request.json()
+                text_input = request_data.get("text", "")
+                
+                if text_input:
+                    # Process as text input instead of voice
+                    chat_history = request_data.get("chat_history", [])
+                    chat_request = ChatRequest(message=text_input, chat_history=chat_history)
+                    response = await chat_with_agent(chat_request)
+                    return response
+                else:
+                    return JSONResponse(content={
+                        "error": "Voice input not available on server",
+                        "message": "Please use the text input field or provide text in the request body.",
+                        "fallback_available": True
+                    })
+                    
+            except Exception as json_error:
+                return JSONResponse(content={
+                    "error": "Voice input not available on server",
+                    "message": "Please use the text input field.",
+                    "fallback_available": False
+                })
         
         # Local environment with microphone access
         user_input = ""
@@ -376,19 +477,14 @@ async def voice_chat_with_agent(request: Request):
 @app.get("/")
 async def serve_frontend():
     try:
-        # Try to read the HTML file
         with open("securassist.html", "r", encoding="utf-8") as f:
             html_content = f.read()
     except FileNotFoundError:
-        # If file doesn't exist, serve a basic version
         html_content = """
         <!DOCTYPE html>
-        <html lang="en">
+        <html>
         <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>SecurAssist</title>
-            <!-- Your CSS styles here -->
         </head>
         <body>
             <h1>SecurAssist</h1>
@@ -400,14 +496,23 @@ async def serve_frontend():
     from fastapi.responses import HTMLResponse
     return HTMLResponse(content=html_content)
 
-@app.get("/tts-status")
-async def tts_status():
-    """Endpoint to check TTS provider status"""
+@app.get("/debug/env")
+async def debug_environment():
+    """Check if environment variables are set correctly"""
     return {
-        "speechify_configured": bool(SPEECHIFY_API_KEY),
-        "resemble_ai_configured": bool(RESEMBLE_AI_API_KEY),
-        "active_provider": user_sessions["default"].get("tts_provider", "none") if "default" in user_sessions else "none"
+        "elevenlabs_api_key_set": bool(ELEVENLABS_API_KEY),
+        "speechify_api_key_set": bool(SPEECHIFY_API_KEY),
+        "resemble_ai_api_key_set": bool(RESEMBLE_AI_API_KEY),
+        "elevenlabs_voice_id": ELEVENLABS_VOICE_ID,
+        "speechify_voice_id": SPEECHIFY_VOICE_ID,
+        "resemble_ai_voice_uuid": RESEMBLE_AI_VOICE_UUID,
+        "environment": "Render" if os.getenv("RENDER") else "Local"
     }
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "ok", "timestamp": datetime.now().isoformat()}
 
 if __name__ == "__main__":
     import uvicorn

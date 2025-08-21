@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
@@ -18,6 +18,10 @@ import tempfile
 import re
 from datetime import datetime
 import base64
+import subprocess
+import sys
+from pathlib import Path
+import shutil
 
 app = FastAPI(title="SecurAssist API")
 
@@ -43,6 +47,32 @@ SPEECHIFY_BASE_URL = os.getenv("SPEECHIFY_BASE_URL", "https://api.speechify.com"
 RESEMBLE_AI_API_KEY = os.getenv("RESEMBLE_AI_API_KEY")
 RESEMBLE_AI_VOICE_UUID = os.getenv("RESEMBLE_AI_VOICE_UUID", "55592656")
 RESEMBLE_AI_BASE_URL = "https://f.cluster.resemble.ai"
+
+def check_ffmpeg_installed():
+    """Check if FFmpeg is installed and available"""
+    try:
+        result = subprocess.run(['ffmpeg', '-version'], 
+                              capture_output=True, text=True, timeout=5)
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return False
+
+@app.on_event("startup")
+async def startup_event():
+    """Check for required dependencies on startup"""
+    if not check_ffmpeg_installed():
+        print("⚠️  WARNING: FFmpeg is not installed. Audio conversion may not work.")
+        print("   To install FFmpeg on Render, add 'ffmpeg' to apt.txt")
+    else:
+        print("✅ FFmpeg is installed and available")
+        
+    # Check other dependencies
+    try:
+        import speech_recognition as sr
+        import pydub
+        print("✅ All audio dependencies loaded successfully")
+    except ImportError as e:
+        print(f"❌ Missing dependency: {e}")
 
 def normalize_text_for_tts(text):
     """
@@ -305,6 +335,7 @@ def text_to_speech_with_fallback(text):
 class ChatRequest(BaseModel):
     message: str
     chat_history: list = []
+    is_voice: bool = False
 
 class ChatResponse(BaseModel):
     response: str
@@ -405,95 +436,107 @@ async def get_audio():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving audio: {str(e)}")
 
+@app.post("/transcribe-audio")
+async def transcribe_audio(audio: UploadFile = File(...)):
+    """
+    Transcribe audio using speech recognition with FFmpeg fallbacks
+    """
+    try:
+        # Save uploaded file to temporary location
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as temp_audio:
+            shutil.copyfileobj(audio.file, temp_audio)
+            temp_audio_path = temp_audio.name
+        
+        # Try to convert using FFmpeg (if available)
+        wav_path = temp_audio_path.replace(".webm", ".wav")
+        conversion_success = False
+        
+        if check_ffmpeg_installed():
+            try:
+                # Convert using pydub (requires FFmpeg)
+                audio_segment = AudioSegment.from_file(temp_audio_path, format="webm")
+                audio_segment.export(wav_path, format="wav")
+                conversion_success = True
+                print("✅ Audio converted using FFmpeg")
+                
+            except Exception as conversion_error:
+                print(f"⚠️  Pydub conversion failed: {conversion_error}")
+                conversion_success = False
+        else:
+            print("⚠️  FFmpeg not available for conversion")
+        
+        # Try to transcribe using the appropriate file
+        transcription = None
+        try:
+            recognizer = sr.Recognizer()
+            
+            if conversion_success:
+                # Use the converted WAV file
+                with sr.AudioFile(wav_path) as source:
+                    audio_data = recognizer.record(source)
+                    transcription = recognizer.recognize_google(audio_data)
+            else:
+                # Fallback: try to process the original file directly
+                # This may work for some formats without conversion
+                try:
+                    with sr.AudioFile(temp_audio_path) as source:
+                        audio_data = recognizer.record(source)
+                        transcription = recognizer.recognize_google(audio_data)
+                except:
+                    # Final fallback: use the raw binary data
+                    audio.file.seek(0)  # Reset file pointer
+                    audio_data = sr.AudioData(audio.file.read(), 48000, 2)
+                    transcription = recognizer.recognize_google(audio_data)
+            
+        except sr.UnknownValueError:
+            return {"error": "Could not understand the audio"}
+        except sr.RequestError as e:
+            return {"error": f"Speech recognition error: {e}"}
+        except Exception as e:
+            return {"error": f"Audio processing error: {str(e)}"}
+        
+        finally:
+            # Clean up temporary files
+            Path(temp_audio_path).unlink(missing_ok=True)
+            Path(wav_path).unlink(missing_ok=True)
+        
+        return {"transcription": transcription}
+            
+    except Exception as e:
+        return {"error": f"Audio processing error: {str(e)}"}
+
 @app.post("/voice-chat")
 async def voice_chat_with_agent(request: Request):
+    """
+    This endpoint should only handle fallback for server environments
+    """
     try:
-        # Check if we're in a server environment
-        is_server_environment = os.getenv("RENDER", False) or os.getenv("SERVER", False)
-        
-        if is_server_environment:
-            # For server environments, provide a text input fallback
-            try:
-                request_data = await request.json()
-                text_input = request_data.get("text", "")
-                is_fallback = request_data.get("is_fallback", False)
-                
-                if text_input:
-                    # Process as text input instead of voice
-                    chat_history = request_data.get("chat_history", [])
-                    chat_request = ChatRequest(message=text_input, chat_history=chat_history)
-                    response = await chat_with_agent(chat_request)
-                    
-                    # Add flag to indicate this was a fallback response
-                    response_dict = response.dict()
-                    response_dict["is_fallback"] = is_fallback
-                    return JSONResponse(content=response_dict)
-                else:
-                    return JSONResponse(content={
-                        "error": "Voice input not available on server",
-                        "message": "Please use the text input field or provide text in the request body.",
-                        "fallback_available": True,
-                        "is_fallback": False
-                    })
-                    
-            except Exception as json_error:
-                return JSONResponse(content={
-                    "error": "Voice input not available on server",
-                    "message": "Please use the text input field.",
-                    "fallback_available": False,
-                    "is_fallback": False
-                })
-        
-        # Local environment with microphone access - try to use voice
+        # Server environment - only provide text fallback
         try:
-            user_input = ""
-            with sr.Microphone() as source:
-                print("Listening...")
-                recognizer.adjust_for_ambient_noise(source)
-                audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
-
-                try:
-                    user_input = recognizer.recognize_google(audio)
-                    print("You said: ", user_input)
-                except sr.WaitTimeoutError:
-                    return JSONResponse(content={"error": "No speech detected", "is_fallback": False})
-                except sr.UnknownValueError:
-                    return JSONResponse(content={"error": "Couldn't understand audio", "is_fallback": False})
-                except sr.RequestError:
-                    return JSONResponse(content={"error": "Could not request results from Google Speech Recognition service", "is_fallback": False})
+            request_data = await request.json()
+            text_input = request_data.get("text", "")
             
-            if not user_input:
-                return JSONResponse(content={"error": "No input received", "is_fallback": False})
-
-            # Get chat history from request if available
-            try:
-                request_data = await request.json()
+            if text_input:
+                # Process as text input
                 chat_history = request_data.get("chat_history", [])
-            except:
-                chat_history = []
+                chat_request = ChatRequest(message=text_input, chat_history=chat_history, is_voice=True)
+                response = await chat_with_agent(chat_request)
+                
+                # Add flag to indicate this was a fallback response
+                response_dict = response.dict()
+                response_dict["is_fallback"] = True
+                return JSONResponse(content=response_dict)
+        except:
+            pass
             
-            # Process the voice input
-            chat_request = ChatRequest(message=user_input, chat_history=chat_history)
-            response = await chat_with_agent(chat_request)
-            
-            # Add flag to indicate this was a real voice response
-            response_dict = response.dict()
-            response_dict["is_fallback"] = False
-            return response_dict
-            
-        except Exception as voice_error:
-            print(f"Voice capture error: {voice_error}")
-            # Fall back to text input if voice fails
-            return JSONResponse(content={
-                "error": "Microphone access failed",
-                "message": "Please use text input instead.",
-                "fallback_available": True,
-                "is_fallback": False
-            })
+        return JSONResponse(content={
+            "error": "Voice input requires client-side speech recognition",
+            "message": "Please use a browser that supports speech recognition or type your message.",
+            "fallback_available": True
+        })
         
     except Exception as e:
-        print(f"Voice chat error: {e}")
-        raise HTTPException(status_code=500, detail=f"Error processing voice request: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
 
 @app.get("/")
 async def serve_frontend():
@@ -527,13 +570,41 @@ async def debug_environment():
         "elevenlabs_voice_id": ELEVENLABS_VOICE_ID,
         "speechify_voice_id": SPEECHIFY_VOICE_ID,
         "resemble_ai_voice_uuid": RESEMBLE_AI_VOICE_UUID,
-        "environment": "Render" if os.getenv("RENDER") else "Local"
+        "environment": "Render" if os.getenv("RENDER") else "Local",
+        "ffmpeg_available": check_ffmpeg_installed()
     }
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
-    return {"status": "ok", "timestamp": datetime.now().isoformat()}
+    """Health check endpoint that verifies dependencies"""
+    status = {
+        "status": "ok",
+        "timestamp": datetime.now().isoformat(),
+        "ffmpeg_available": check_ffmpeg_installed(),
+        "dependencies": {
+            "speech_recognition": True,
+            "pydub": True,
+            "ffmpeg": check_ffmpeg_installed()
+        }
+    }
+    
+    # Test each dependency
+    try:
+        import speech_recognition as sr
+    except ImportError:
+        status["dependencies"]["speech_recognition"] = False
+        status["status"] = "degraded"
+    
+    try:
+        import pydub
+    except ImportError:
+        status["dependencies"]["pydub"] = False
+        status["status"] = "degraded"
+    
+    if not status["dependencies"]["ffmpeg"]:
+        status["status"] = "degraded"
+    
+    return status
 
 if __name__ == "__main__":
     import uvicorn

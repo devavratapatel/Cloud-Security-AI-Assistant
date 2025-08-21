@@ -17,6 +17,7 @@
             --agent-message-bg: #f0fdf4;
             --border-color: #e5e7eb;
             --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --recording-color: #dc2626;
         }
         
         * {
@@ -121,32 +122,6 @@
             text-align: right;
         }
 
-        /* Ensure messages don't overflow */
-        .message {
-            max-width: 80%;
-            padding: 12px 16px;
-            border-radius: 18px;
-            animation: fadeIn 0.3s ease-in;
-            position: relative;
-            line-height: 1.5;
-            word-wrap: break-word;
-            overflow-wrap: break-word;
-        }
-
-        /* Improve readability */
-        .agent-message .message-text {
-            color: #1f2937;
-        }
-
-        .user-message .message-text {
-            color: #1e40af;
-        }
-
-        .chat-container {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            line-height: 1.5;
-        }
-        
         .input-container {
             display: flex;
             gap: 10px;
@@ -221,6 +196,11 @@
             transform: translateY(0);
         }
         
+        .voice-btn.recording {
+            background-color: var(--recording-color);
+            animation: pulse 1.5s infinite;
+        }
+        
         .typing-indicator {
             align-self: flex-start;
             background-color: var(--agent-message-bg);
@@ -252,6 +232,27 @@
             animation: pulse 1.5s infinite;
         }
         
+        .recording-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px;
+            background-color: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 8px;
+            margin-top: 10px;
+            color: #dc2626;
+            font-size: 14px;
+        }
+        
+        .recording-dot {
+            width: 12px;
+            height: 12px;
+            background-color: #dc2626;
+            border-radius: 50%;
+            animation: recordingPulse 1.5s infinite;
+        }
+        
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(10px); }
             to { opacity: 1; transform: translateY(0); }
@@ -264,7 +265,12 @@
         
         @keyframes pulse {
             0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
+            50% { opacity: 0.7; }
+        }
+        
+        @keyframes recordingPulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
         }
         
         @media (max-width: 768px) {
@@ -318,22 +324,177 @@
                     </svg>
                     Send
                 </button>
-                <button class="voice-btn" onclick="startVoiceChat()">
+                <button class="voice-btn" id="voiceButton" onclick="toggleRecording()">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
                         <path d="M5 3a3 3 0 0 1 6 0v5a3 3 0 0 1-6 0V3z"/>
                         <path d="M3.5 6.5A.5.5 0 0 1 4 7v1a4 4 0 0 0 8 0V7a.5.5 0 0 1 1 0v1a5 5 0 0 1-4.5 4.975V15h3a.5.5 0 0 1 0 1h-7a.5.5 0 0 1 0-1h3v-2.025A5 5 0 0 1 3 8V7a.5.5 0 0 1 .5-.5z"/>
                     </svg>
-                    Voice
+                    <span id="voiceButtonText">Voice</span>
                 </button>
             </div>
+        </div>
+        
+        <div id="recordingIndicator" class="recording-indicator" style="display: none;">
+            <div class="recording-dot"></div>
+            <span>Recording... Speak now</span>
         </div>
     </div>
 
     <script>
         const chatDiv = document.getElementById('chat');
         const messageInput = document.getElementById('message');
+        const voiceButton = document.getElementById('voiceButton');
+        const voiceButtonText = document.getElementById('voiceButtonText');
+        const recordingIndicator = document.getElementById('recordingIndicator');
         let isProcessing = false;
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let isRecording = false;
         
+        // Check if browser supports media recording
+        function checkMediaSupport() {
+            return navigator.mediaDevices && navigator.mediaDevices.getUserMedia && MediaRecorder;
+        }
+        
+        // Initialize the app
+        async function initApp() {
+            if (!checkMediaSupport()) {
+                voiceButton.style.display = 'none';
+                console.log('Media recording not supported in this browser');
+            }
+            messageInput.focus();
+        }
+        
+        // Toggle recording
+        async function toggleRecording() {
+            if (isRecording) {
+                stopRecording();
+            } else {
+                startRecording();
+            }
+        }
+        
+        // Start recording
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+                audioChunks = [];
+                
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        audioChunks.push(event.data);
+                    }
+                };
+                
+                mediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    await sendAudioToServer(audioBlob);
+                    
+                    // Stop all tracks
+                    stream.getTracks().forEach(track => track.stop());
+                };
+                
+                mediaRecorder.start();
+                isRecording = true;
+                
+                // Update UI
+                voiceButton.classList.add('recording');
+                voiceButtonText.textContent = 'Stop';
+                recordingIndicator.style.display = 'flex';
+                
+            } catch (error) {
+                console.error('Error starting recording:', error);
+                addMessage('agent', 'Could not access microphone. Please check permissions.');
+            }
+        }
+        
+        // Stop recording
+        function stopRecording() {
+            if (mediaRecorder && isRecording) {
+                mediaRecorder.stop();
+                isRecording = false;
+                
+                // Update UI
+                voiceButton.classList.remove('recording');
+                voiceButtonText.textContent = 'Voice';
+                recordingIndicator.style.display = 'none';
+            }
+        }
+        
+        // Send audio to server for transcription
+        async function sendAudioToServer(audioBlob) {
+            isProcessing = true;
+            showTypingIndicator();
+            
+            try {
+                const formData = new FormData();
+                formData.append('audio', audioBlob, 'recording.webm');
+                
+                const response = await fetch('/transcribe-audio', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                hideTypingIndicator();
+                
+                if (data.transcription) {
+                    // Send the transcribed text to the chat endpoint
+                    await processVoiceMessage(data.transcription);
+                } else if (data.error) {
+                    addMessage('agent', 'Sorry, I couldn\'t understand that. Please try again.');
+                }
+            } catch (error) {
+                hideTypingIndicator();
+                addMessage('agent', 'Error processing audio. Please try again.');
+                console.error('Error sending audio:', error);
+            } finally {
+                isProcessing = false;
+            }
+        }
+        
+        // Process the transcribed message
+        async function processVoiceMessage(transcript) {
+            isProcessing = true;
+            showTypingIndicator();
+            
+            try {
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        message: transcript,
+                        chat_history: getChatHistory(),
+                        is_voice: true
+                    })
+                });
+                
+                const data = await response.json();
+                hideTypingIndicator();
+                
+                // Show user voice input
+                addMessage('user', transcript, true);
+                
+                // Format and show agent response
+                const formattedResponse = formatAgentResponse(data.response);
+                addMessage('agent', formattedResponse);
+                
+                // Play audio response if available
+                if (data.audio_url) {
+                    const audio = new Audio(data.audio_url);
+                    audio.play();
+                }
+            } catch (error) {
+                hideTypingIndicator();
+                addMessage('agent', 'Sorry, I encountered an error. Please try again.');
+                console.error('Error processing voice message:', error);
+            } finally {
+                isProcessing = false;
+            }
+        }
+        
+        // Existing functions (keep these the same)
         function addMessage(sender, message, isAudio = false) {
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${sender}-message`;
@@ -341,7 +502,6 @@
             const senderName = sender === 'user' ? 'You' : 'SecurAssist';
             const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             
-            // Properly escape HTML to prevent rendering issues
             const escapedMessage = message
                 .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
@@ -388,13 +548,12 @@
         }
         
         function formatAgentResponse(text) {
-            // Remove any markdown or special formatting that might interfere with display
             return text
-                .replace(/\*\*(.*?)\*\*/g, '$1') // Remove bold
-                .replace(/\*(.*?)\*/g, '$1')     // Remove italics
-                .replace(/`(.*?)`/g, '$1')       // Remove code ticks
-                .replace(/#{1,6}\s?/g, '')       // Remove headers
-                .replace(/\n{3,}/g, '\n\n');     // Limit consecutive newlines
+                .replace(/\*\*(.*?)\*\*/g, '$1')
+                .replace(/\*(.*?)\*/g, '$1')
+                .replace(/`(.*?)`/g, '$1')
+                .replace(/#{1,6}\s?/g, '')
+                .replace(/\n{3,}/g, '\n\n');
         }
         
         function getChatHistory() {
@@ -415,195 +574,6 @@
             });
             
             return messages;
-        }
-        
-        // Add this function to detect if we're on a server environment
-        async function detectServerEnvironment() {
-            try {
-                const response = await fetch('/debug/env');
-                const data = await response.json();
-                return data.environment === "Render";
-            } catch (error) {
-                console.log('Could not detect server environment, assuming local:', error);
-                return false;
-            }
-        }
-
-        // Update the voice button behavior
-        async function setupVoiceButton() {
-            const isServer = await detectServerEnvironment();
-            const voiceButton = document.querySelector('.voice-btn');
-            
-            if (isServer && voiceButton) {
-                voiceButton.title = "Voice input not available on server - click to type instead";
-                voiceButton.style.opacity = "0.7";
-                voiceButton.onclick = function() {
-                    showVoiceFallback();
-                    return false;
-                };
-            }
-        }
-
-        // Enhanced voice fallback UI
-        function showVoiceFallback() {
-            // Remove any existing fallback
-            const existingFallback = document.getElementById('voice-fallback');
-            if (existingFallback) {
-                existingFallback.remove();
-            }
-            
-            const fallbackHtml = `
-                <div id="voice-fallback" style="margin-top: 15px; padding: 15px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e9ecef;">
-                    <p style="margin: 0 0 10px 0; color: #6c757d; font-size: 14px;">
-                        <span style="font-weight: bold;">ℹ️ Voice input not available on server</span><br>
-                        Type your message below instead:
-                    </p>
-                    <div style="display: flex; gap: 10px; align-items: center;">
-                        <input type="text" id="voice-fallback-input" placeholder="Type what you want to say..." 
-                            style="flex: 1; padding: 10px 12px; border: 1px solid #ced4da; border-radius: 6px; font-size: 14px;"
-                            onkeypress="if(event.key === 'Enter') submitVoiceFallback()">
-                        <button onclick="submitVoiceFallback()" 
-                                style="padding: 10px 16px; background: #6c757d; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px;">
-                            Send
-                        </button>
-                        <button onclick="cancelVoiceFallback()" 
-                                style="padding: 10px 12px; background: #dc3545; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px;">
-                            Cancel
-                        </button>
-                    </div>
-                </div>
-            `;
-            
-            // Insert after the input container
-            const inputContainer = document.querySelector('.input-container');
-            inputContainer.insertAdjacentHTML('afterend', fallbackHtml);
-            
-            // Focus the input field
-            setTimeout(() => {
-                const fallbackInput = document.getElementById('voice-fallback-input');
-                if (fallbackInput) fallbackInput.focus();
-            }, 100);
-        }
-
-        function cancelVoiceFallback() {
-            const fallback = document.getElementById('voice-fallback');
-            if (fallback) fallback.remove();
-        }
-
-        // Enhanced fallback submission
-        async function submitVoiceFallback() {
-            const fallbackInput = document.getElementById('voice-fallback-input');
-            const text = fallbackInput.value.trim();
-            
-            if (!text) return;
-            
-            // Remove the fallback UI
-            const fallback = document.getElementById('voice-fallback');
-            if (fallback) fallback.remove();
-            
-            isProcessing = true;
-            showTypingIndicator();
-            
-            try {
-                const response = await fetch('/voice-chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        text: text,
-                        is_fallback: true,
-                        chat_history: getChatHistory() 
-                    })
-                });
-                
-                const data = await response.json();
-                hideTypingIndicator();
-                
-                if (data.response) {
-                    // Show user message with fallback indicator
-                    addMessage('user', text, true);
-                    
-                    // Format the agent response before displaying
-                    const formattedResponse = formatAgentResponse(data.response);
-                    addMessage('agent', formattedResponse);
-                    
-                    // Play audio if available
-                    if (data.audio_url) {
-                        const audio = new Audio(data.audio_url);
-                        audio.play();
-                    }
-                } else if (data.error) {
-                    addMessage('agent', 'Error: ' + data.error);
-                    // Re-show fallback if error suggests it
-                    if (data.fallback_available) {
-                        showVoiceFallback();
-                    }
-                }
-            } catch (error) {
-                hideTypingIndicator();
-                addMessage('agent', 'Sorry, I encountered an error. Please try again.');
-                console.error('Error:', error);
-            } finally {
-                isProcessing = false;
-            }
-        }
-
-        // Update the startVoiceChat function
-        async function startVoiceChat() {
-            if (isProcessing) return;
-            isProcessing = true;
-            
-            showTypingIndicator();
-            
-            try {
-                const response = await fetch('/voice-chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        chat_history: getChatHistory(),
-                        is_fallback: false
-                    })
-                });
-                
-                const data = await response.json();
-                hideTypingIndicator();
-                
-                if (data.response) {
-                    // Format the response for display
-                    const formattedResponse = formatAgentResponse(data.response);
-                    
-                    if (data.is_fallback) {
-                        // This was a fallback response, show text input UI
-                        showVoiceFallback();
-                    } else {
-                        // This was a real voice response
-                        addMessage('user', data.response, true);
-                        addMessage('agent', formattedResponse);
-                        
-                        // Play audio if available
-                        if (data.audio_url) {
-                            const audio = new Audio(data.audio_url);
-                            audio.play();
-                        }
-                    }
-                } else if (data.error) {
-                    if (data.error.includes("not available") || data.error.includes("Microphone")) {
-                        if (data.fallback_available !== false) {
-                            showVoiceFallback();
-                        } else {
-                            addMessage('agent', 'Voice input is not available. Please use text input instead.');
-                        }
-                    } else {
-                        addMessage('agent', 'Error: ' + data.error);
-                    }
-                }
-            } catch (error) {
-                hideTypingIndicator();
-                // Assume server environment on error
-                showVoiceFallback();
-                console.error('Error:', error);
-            } finally {
-                isProcessing = false;
-            }
         }
         
         async function sendMessage() {
@@ -631,13 +601,9 @@
                 const data = await response.json();
                 hideTypingIndicator();
                 
-                // Format the agent response before displaying
                 const formattedResponse = formatAgentResponse(data.response);
-                
-                // ONLY add the agent message - don't add user message again
                 addMessage('agent', formattedResponse);
                 
-                // Play audio if available
                 if (data.audio_url) {
                     const audio = new Audio(data.audio_url);
                     audio.play();
@@ -651,12 +617,6 @@
             }
         }
         
-        // Update your initialization
-        async function initApp() {
-            await setupVoiceButton();
-            messageInput.focus();
-        }
-
         // Allow pressing Enter to send message
         messageInput.addEventListener('keypress', function(e) {
             if (e.key === 'Enter' && !isProcessing) {
@@ -664,7 +624,7 @@
             }
         });
         
-        // Call init on load
+        // Initialize the app
         document.addEventListener('DOMContentLoaded', initApp);
     </script>
 </body>

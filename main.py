@@ -217,7 +217,7 @@ async def voice_chat_with_agent():
 @app.get("/")
 async def serve_frontend():
     try:
-        with open("securiassist.html", "r", encoding="utf-8") as f:
+        with open("securassist.html", "r", encoding="utf-8") as f:
             html_content = f.read()
     except FileNotFoundError:
         # Fallback: return a simple message or create the HTML on the fly

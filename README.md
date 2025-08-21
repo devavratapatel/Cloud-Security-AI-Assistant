@@ -10,6 +10,8 @@ Tech Stack Used:
 ## Models Used:
 - Gemini-1.5-Flash
 - Eleven Labs
+- Resemble
+- Speechify
 
 ## Knowladge Database:
 Generated a documentation for a Cloud Security Company offering endpoint protection, etc. using ChatGPT and DeepSeek.
@@ -20,6 +22,7 @@ Created Agent using langgraph with a router that can decide on what should be th
 
 ## Audio
 Used Speech Recognition python library to understand user input and convert it to text. Connected agent to Eleven Labs API to convert generated output to conversational and fluent voice.
+Well, Unfortunately I got banned on Eleven Labs for creating multiple accounts. Therefore I have introduced Speechify and Resemble AI functionalities. In the case of the api running out of credits from speechify, the program runs on resemble as a back up. Although Speechify and resemble are alternatives, none of them or any product comes close to the quality and conversational voice eleven labs is able to produce.
 
 ## Front-End
 Used a very basic FastAPI and HTML template to connect the agent and its functionalities to a UI.

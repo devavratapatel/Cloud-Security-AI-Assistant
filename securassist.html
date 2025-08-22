@@ -351,12 +351,10 @@
         let audioChunks = [];
         let isRecording = false;
         
-        // Check if browser supports media recording
         function checkMediaSupport() {
             return navigator.mediaDevices && navigator.mediaDevices.getUserMedia && MediaRecorder;
         }
         
-        // Initialize the app
         async function initApp() {
             if (!checkMediaSupport()) {
                 voiceButton.style.display = 'none';
@@ -365,7 +363,6 @@
             messageInput.focus();
         }
         
-        // Toggle recording
         async function toggleRecording() {
             if (isRecording) {
                 stopRecording();
@@ -374,7 +371,6 @@
             }
         }
         
-        // Start recording
         async function startRecording() {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -391,14 +387,12 @@
                     const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
                     await sendAudioToServer(audioBlob);
                     
-                    // Stop all tracks
                     stream.getTracks().forEach(track => track.stop());
                 };
                 
                 mediaRecorder.start();
                 isRecording = true;
                 
-                // Update UI
                 voiceButton.classList.add('recording');
                 voiceButtonText.textContent = 'Stop';
                 recordingIndicator.style.display = 'flex';
@@ -409,20 +403,17 @@
             }
         }
         
-        // Stop recording
         function stopRecording() {
             if (mediaRecorder && isRecording) {
                 mediaRecorder.stop();
                 isRecording = false;
                 
-                // Update UI
                 voiceButton.classList.remove('recording');
                 voiceButtonText.textContent = 'Voice';
                 recordingIndicator.style.display = 'none';
             }
         }
         
-        // Send audio to server for transcription
         async function sendAudioToServer(audioBlob) {
             isProcessing = true;
             showTypingIndicator();
@@ -440,7 +431,6 @@
                 hideTypingIndicator();
                 
                 if (data.transcription) {
-                    // Send the transcribed text to the chat endpoint
                     await processVoiceMessage(data.transcription);
                 } else if (data.error) {
                     addMessage('agent', 'Sorry, I couldn\'t understand that. Please try again.');
@@ -454,7 +444,6 @@
             }
         }
         
-        // Process the transcribed message
         async function processVoiceMessage(transcript) {
             isProcessing = true;
             showTypingIndicator();
@@ -473,14 +462,14 @@
                 const data = await response.json();
                 hideTypingIndicator();
                 
-                // Show user voice input
+                
                 addMessage('user', transcript, true);
                 
-                // Format and show agent response
+                
                 const formattedResponse = formatAgentResponse(data.response);
                 addMessage('agent', formattedResponse);
                 
-                // Play audio response if available
+                
                 if (data.audio_url) {
                     const audio = new Audio(data.audio_url);
                     audio.play();
@@ -617,14 +606,12 @@
             }
         }
         
-        // Allow pressing Enter to send message
         messageInput.addEventListener('keypress', function(e) {
             if (e.key === 'Enter' && !isProcessing) {
                 sendMessage();
             }
         });
         
-        // Initialize the app
         document.addEventListener('DOMContentLoaded', initApp);
     </script>
 </body>

@@ -510,8 +510,7 @@ async def transcribe_audio(audio: UploadFile = File(...)):
                 except:
                     audio.file.seek(0) 
                     audio_data = sr.AudioData(audio.file.read(), 48000, 2)
-                    transcription = recognizer.recognize_google(audio_data)
-            
+                    transcription = recognizer.recognize_google(audio_data)        
         except sr.UnknownValueError:
             return {"error": "Could not understand the audio"}
         except sr.RequestError as e:

@@ -35,8 +35,8 @@ app.add_middleware(
 
 recognizer = sr.Recognizer()
 
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
-ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM") 
+ELEVENLABS_API_KEY = "sk_13d02f2890bcb84e45d74863d7e5bc1e9c45544b0fb8bab5"
+ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
 ELEVENLABS_BASE_URL = "https://api.elevenlabs.io/v1"
 
 SPEECHIFY_API_KEY = os.getenv("SPEECHIFY_API_KEY")
